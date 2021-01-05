@@ -1,0 +1,115 @@
+﻿#pragma kernel UpdateParticle
+
+#include "SimplexNoise3D.cginc"
+#include "RandomLib.cginc"
+
+//Particle structure
+struct Particle {
+	float3 position;
+	float rotation;
+	float rotationVelocity;
+	float3 velocity;
+	float4 color;
+	float startSize;
+	float size;
+	float3 seed;
+};
+
+//Particle's position and color structure
+struct TargetInfo
+{
+	float3 position;
+	float4 color;
+};
+
+float dampling;
+
+//force parameters
+float vortexForceStrength;
+float turbulenceForceStrength;
+float graphicForceStrength;
+float attractForceStrength;
+float directionalForceStrength;
+
+float directionalForceDirectionX;
+float directionalForceDirectionY;
+float directionalForceDirectionZ;
+
+float vortexForceDirectionX;
+float vortexForceDirectionY;
+float vortexForceDirectionZ;
+
+//overall alpha
+float alpha = 1;
+
+//overall scale multiplier
+float sizeMultiply = 1;
+
+//store particle infomation in memory
+RWStructuredBuffer<Particle> particles;
+RWStructuredBuffer<TargetInfo> targetInfos;
+
+const float3 float3Zero = float3(0, 0, 0);
+const float4 float4Zero = float4(0, 0, 0, 0);
+
+//delta time passed by monobehaviour
+float deltaTime;
+
+//run time passed by monobehaviour
+float runtime;
+
+[numthreads(128,1,1)]
+void UpdateParticle(uint3 id : SV_DispatchThreadID)
+{
+	particles[id.x].rotation += particles[id.x].rotationVelocity * deltaTime;
+
+	if (directionalForceStrength != 0) UpdateDirectionalForce(id);
+	if (graphicForceStrength>0) UpdateGraphicForce(id);
+	if (vortexForceStrength!=0) UpdateVortexForce(id);
+	if (attractForceStrength!=0) UpdateAttractionForce(id);
+	if (turbulenceForceStrength>0) UpdateTurbulenceForce(id);
+
+	particles[id.x].size =  particles[id.x].startSize * sizeMultiply;
+	particles[id.x].velocity = lerp(particles[id.x].velocity, float3Zero, dampling * deltaTime);
+	particles[id.x].position += particles[id.x].velocity * deltaTime;
+	
+}
+
+void UpdateTurbulenceForce(uint3 id : SV_DispatchThreadID) {
+	float3 uv = particles[id.x].seed  * runtime;
+	particles[id.x].velocity += snoise_grad(uv) * turbulenceForceStrength;
+}
+
+void UpdateGraphicForce(uint3 id : SV_DispatchThreadID)
+{
+	float3 graphicForce = targetInfos[id.x].position - (particles[id.x].position + particles[id.x].velocity);
+	particles[id.x].velocity += graphicForce * graphicForceStrength;
+	particles[id.x].color = lerp(particles[id.x].color, targetInfos[id.x].color, deltaTime);
+}
+
+void UpdateVortexForce(uint3 id : SV_DispatchThreadID)
+{
+	float3 direction = cross(normalize(particles[id.x].position), float3(vortexForceDirectionX, vortexForceDirectionY, vortexForceDirectionZ));
+	particles[id.x].velocity += normalize(direction) * vortexForceStrength;
+}
+
+void UpdateAttractionForce(uint3 id : SV_DispatchThreadID)
+{
+	float distanceSqr = dot(particles[id.x].position, particles[id.x].position);
+	float3 direction = -normalize(particles[id.x].position);
+
+	if (attractForceStrength < 0) {
+		particles[id.x].velocity += (1/distanceSqr) * direction * attractForceStrength;
+	}
+	else {
+		particles[id.x].velocity += distanceSqr * direction * attractForceStrength;
+	}
+}
+
+void UpdateDirectionalForce(uint3 id : SV_DispatchThreadID)
+{
+	float3 direction = float3(directionalForceDirectionX, directionalForceDirectionY, directionalForceDirectionZ);
+	particles[id.x].velocity += normalize(direction) * directionalForceStrength * particles[id.x].seed.z;
+}
+
+
